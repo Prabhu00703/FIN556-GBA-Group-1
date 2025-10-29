@@ -1,0 +1,217 @@
+Clone from GIT:
+https://github.com/Prabhu00703/FIN556-GBA-Group-1
+
+
+STEP 0. 
+inside contracts rename the below like DemoTokenYOURINITIALS.sol (example lasttname  and firstName initials for G Sreenivasan like DemoTokenSG.sol so the initials is YOURINITIALS--> SG)
+fin556-gba\contracts\DemoTokenYOURINITIALS.sol
+
+	a) 
+	replace below 
+		contract DemoTokenYOURINITIALS is OwnableMintableERC20 {
+	with ypur initials (example SG)
+		contract DemoTokenYOURINITIALS is OwnableMintableERC20 { 
+		
+	//example -->contract DemoTokenSG is OwnableMintableERC20 {    
+	
+	b)
+	replace below
+		constructor() OwnableMintableERC20("DEMOTOKEN-YOURINITIALS", "DEMOTOKEN-YOURINITIALS") {
+	with with ypur initials (example SG)
+		constructor() OwnableMintableERC20("DEMOTOKEN-YOURINITIALS", "DEMOTOKEN-YOURINITIALS") {    
+		
+	//example --> constructor() OwnableMintableERC20("DEMOTOKEN-SG", "DEMOTOKEN-SG") {    
+	
+	
+	c) 
+
+		inside file fin556-gba\scripts\2_deployTokens.js
+		replace this line 
+			const TokenA = await ethers.getContractFactory("DemoTokenYOURINITIALS"); 
+		with yours
+		example --> 	const TokenA = await ethers.getContractFactory("DemoTokenSG");
+		
+	d)
+	Step1:  add/amend these in your .env file with yoour credentials
+			FIN556_MNEMONIC="XX YY XX TT YY RR Y dss remdsdsdember dsdsdsd ds dsdsdsds"
+			FIN556_ALCHEMY_URL="https://eth-hoodi.g.alchemy.com/v2/youralchemykey"
+		
+
+Step 1:
+npm install --save-dev hardhat@^2.22.5 @nomicfoundation/hardhat-toolbox@^3.0.0
+
+# ⚙️ Environment configuration
+npm install dotenv
+
+# 🪙 OpenZeppelin Contracts for ERC20, Ownable, etc.
+npm install @openzeppelin/contracts
+
+# 🦄 Uniswap V2 Core + Periphery for AMM setup
+npm install @uniswap/v2-core @uniswap/v2-periphery
+
+# 🔍 Optional: ethers + chai for scripting and testing
+npm install --save-dev ethers chai
+
+hh compile
+
+
+STEP 2. Test in localhost:
+
+
+hh run scripts/1_deployWETH9.js --network localhost 
+hh run scripts/2_deployTokens.js --network localhost
+hh run scripts/3_deployUniswap.js --network localhost
+hh run scripts/4_createPool.js --network localhost
+hh run scripts/5_addLiquidity.js --network localhost
+
+
+
+******************************************IF ONLY LOCAL HOST SUCCESSFUL untill aoove line WITHOUT ERROR THEN PROCEED TO HOODI DEPLOYMENT BELOW*****************************	
+
+
+
+
+
+
+
+
+Step 1:
+hh run scripts/2_deployTokens.js --network hoodi
+
+
+	Sample Output: 
+	[dotenv@17.2.3] injecting env (2) from .env -- tip: 🔑 add access controls to secrets: https://dotenvx.com/ops
+	[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+	Using account: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C 
+	Token deployed to: 0xb567d0988945d0B5B1B64871a37A24Ea17Bea768
+	✅ Updated /workspace/fin556-gba/scripts/addresses.json successfully
+	vscode@docker-desktop:/workspace/fin556-gba$
+
+Test URL (replace ur token url from "Token deployed to:" ) as below is my token url
+url: https://hoodi.etherscan.io/token/0xb567d0988945d0b5b1b64871a37a24ea17bea768
+
+
+Step 2.1 --replace from  above values in the "Token deployed to: " for token , rest must stay same like weth9,factory and router
+
+	************************************************************************************************************************************
+	verify addresses.json before next step:
+	{
+	  "weth9": "0x7a1fd5C3185fe6261577AccEe220844Dc9026225",
+	  "token": "0xb567d0988945d0B5B1B64871a37A24Ea17Bea768",   
+	  "factory": "0x342D7aeC78cd3b581eb67655B6B7Bb157328590e",
+	  "router": "0x5b491662E508c2E405500C8BF9d67E5dF780cD8e"
+	}
+	************************************************************************************************************************************
+
+step 4: 
+hh run scripts/4_createPool.js --network hoodi
+
+	Sample Output:
+	[dotenv@17.2.3] injecting env (2) from .env -- tip: 👥 sync secrets across teammates & machines: https://dotenvx.com/ops
+	[dotenv@17.2.3] injecting env (0) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+	👤 Signer: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+
+	🔍 Checking if pool exists...
+	🧱 Pair does not exist — creating new pool...
+	🪶 Pool Creation TX Hash: 0x9076a553f95be47c75b79951d9d315faffe855cee5bb49ba44c99a0d80acbf49
+	✅ Pool created successfully!
+
+	📜 Pair Address (from factory): 0x8169ED28b2994D1050FfCC39925901688B1FBe41
+	📦 Pair Address (CREATE2 prediction): 0x213816f62509b5a0A9324419ADADDeb3b60e57fC
+
+	📋 --- Submission Info ---
+	Pool Contract Address: 0x8169ED28b2994D1050FfCC39925901688B1FBe41
+	vscode@docker-desktop:/workspace/fin556-gba$ 
+
+url: 
+Txn Hash: https://hoodi.etherscan.io/tx/0x9076a553f95be47c75b79951d9d315faffe855cee5bb49ba44c99a0d80acbf49
+Pool Contract/Pair Address  Url: https://hoodi.etherscan.io/address/0x8169ED28b2994D1050FfCC39925901688B1FBe41
+
+Step 5:
+hh run scripts/5_addLiquidity.js --network hoodi
+		
+		Sample Output:
+		[dotenv@17.2.3] injecting env (2) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+		[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+		🚀 Adding liquidity to UniswapV2 (Hoodi)...
+		Deployer: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+		Router factory: 0x342D7aeC78cd3b581eb67655B6B7Bb157328590e
+		Your factory: 0x342D7aeC78cd3b581eb67655B6B7Bb157328590e
+		✅ Pair address: 0x8169ED28b2994D1050FfCC39925901688B1FBe41
+		Token balance: 1000000.0
+		Approving router...
+		Approve TX: 0xf19bb7e5bef355ad3afb80044b589b05a670b52b60a327929f37fd01e3f09f85
+		Allowance after approval: 100000.0
+		Adding liquidity...
+		Liquidity TX: 0xbddcbf1c7c443fbf87126bb34c4e9a31d437ecfd8675cc179445d3c6e4249c5a
+		✅ Liquidity added successfully!
+		vscode@docker-desktop:/workspace/fin556-gba$ 
+
+
+
+*************************************DO NOT DO THIS STEPS ITS to TEST DAPP simulating multiple users tokens FOR REFERENCE ONLY**************************************
+
+/////////Test Token for Dapp
+/////////vscode@docker-desktop:/workspace/fin556-gba-member$ hh run scripts/2_deployTokens.js --network hoodi
+/////////[dotenv@17.2.3] injecting env (2) from .env -- tip: 📡 add observability to secrets: https://dotenvx.com/ops
+/////////[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+/////////Using account: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+/////////Token deployed to: 0xc6980101F00398a8f91e8D2eEAe9dd76e56Ec5FC
+/////////✅ Updated /workspace/fin556-gba-member/scripts/addresses.json successfully
+/////////vscode@docker-desktop:/workspace/fin556-gba-member$ hh run scripts/4_createPool.js --network hoodi
+/////////[dotenv@17.2.3] injecting env (2) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+/////////[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+/////////👤 Signer: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+/////////
+/////////🔍 Checking if pool exists...
+/////////ProviderError: execution reverted
+/////////    at HttpProvider.request (/workspace/node_modules/hardhat/src/internal/core/providers/http.ts:116:21)
+/////////    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+/////////    at staticCallResult (/workspace/node_modules/ethers/src.ts/contract/contract.ts:337:22)
+/////////    at staticCall (/workspace/node_modules/ethers/src.ts/contract/contract.ts:303:24)
+/////////    at Proxy.getPair (/workspace/node_modules/ethers/src.ts/contract/contract.ts:351:41)
+/////////    at main (/workspace/fin556-gba-member/scripts/4_createPool.js:40:22)
+/////////vscode@docker-desktop:/workspace/fin556-gba-member$ hh run scripts/4_createPool.js --network hoodi
+/////////[dotenv@17.2.3] injecting env (2) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+/////////[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  suppress all logs with { quiet: true }
+/////////👤 Signer: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+/////////
+/////////🔍 Checking if pool exists...
+/////////ProviderError: execution reverted
+/////////    at HttpProvider.request (/workspace/node_modules/hardhat/src/internal/core/providers/http.ts:116:21)
+/////////    at processTicksAndRejections (node:internal/process/task_queues:105:5)
+/////////    at staticCallResult (/workspace/node_modules/ethers/src.ts/contract/contract.ts:337:22)
+/////////    at staticCall (/workspace/node_modules/ethers/src.ts/contract/contract.ts:303:24)
+/////////    at Proxy.getPair (/workspace/node_modules/ethers/src.ts/contract/contract.ts:351:41)
+/////////    at main (/workspace/fin556-gba-member/scripts/4_createPool.js:40:22)
+/////////vscode@docker-desktop:/workspace/fin556-gba-member$ hh run scripts/4_createPool.js --network hoodi
+/////////[dotenv@17.2.3] injecting env (2) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+/////////[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+/////////👤 Signer: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+/////////
+/////////🔍 Checking if pool exists...
+/////////🧱 Pair does not exist — creating new pool...
+/////////🪶 Pool Creation TX Hash: 0x32531b824ce47dccdbdc0e24f66e7a060c2d8c16062b7b836563b2b463e47b40
+/////////✅ Pool created successfully!
+/////////
+/////////📜 Pair Address (from factory): 0xDc50367c0b6501645144F9De5a7A8eF6C2b879Aa
+/////////📦 Pair Address (CREATE2 prediction): 0x9d8366e48123e7Ba7aA3De909D255960FB2Afe53
+/////////
+/////////📋 --- Submission Info ---
+/////////Pool Contract Address: 0xDc50367c0b6501645144F9De5a7A8eF6C2b879Aa
+/////////vscode@docker-desktop:/workspace/fin556-gba-member$ hh run scripts/5_addLiquidity.js --network hoodi
+/////////[dotenv@17.2.3] injecting env (2) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+/////////[dotenv@17.2.3] injecting env (0) from .env -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
+/////////🚀 Adding liquidity to UniswapV2 (Hoodi)...
+/////////Deployer: 0x0fFbEd44DC59aA5E45A55A419f2E9c11e383E36C
+/////////Router factory: 0x342D7aeC78cd3b581eb67655B6B7Bb157328590e
+/////////Your factory: 0x342D7aeC78cd3b581eb67655B6B7Bb157328590e
+/////////✅ Pair address: 0xDc50367c0b6501645144F9De5a7A8eF6C2b879Aa
+/////////Token balance: 1000000.0
+/////////Approving router...
+/////////Approve TX: 0x849f81a7b3a58d90306e56e161a8aa45d4b988f04bee46e8d00d8a49fead3c78
+/////////Allowance after approval: 100000.0
+/////////Adding liquidity...
+/////////Liquidity TX: 0x92c6c153515e548e84516ce5613172911aef9191630039da904fc949503def62
+/////////✅ Liquidity added successfully!
+/////////vscode@docker-desktop:/workspace/fin556-gba-member$ 

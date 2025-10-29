@@ -10,11 +10,11 @@ async function main() {
   console.log(`Using account: ${await signer.getAddress()}`);
 
   // Deploy TokenPC
-  const TokenA = await ethers.getContractFactory("DemoTokenPC");
+  const TokenA = await ethers.getContractFactory("DemoTokenYOURINITIALS");
   token = await TokenA.deploy();
   await token.waitForDeployment();
   tokenAddress = await token.getAddress();
-  console.log(`TokenPC deployed to: ${tokenAddress}`);
+  console.log(`Token deployed to: ${tokenAddress}`);
   await delay(3000);
 
   // Save token address
