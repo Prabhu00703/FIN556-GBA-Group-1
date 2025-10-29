@@ -1,0 +1,246 @@
+import React, { useState, useEffect } from "react";
+import {
+  CssBaseline,
+  Container,
+  Card,
+  Button,
+  TextField,
+  Box,
+  Divider,
+  CircularProgress,
+} from "@mui/material";
+import { ethers } from "ethers";
+
+const HOODI_CHAIN_ID = 560048;
+
+const ROUTER_ABI = [
+  "function WETH() view returns (address)",
+  "function getAmountsOut(uint256,address[]) view returns (uint256[])",
+  "function swapExactETHForTokensSupportingFeeOnTransferTokens(uint256,address[],address,uint256) payable",
+  "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
+  "function swapExactTokensForTokensSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
+];
+
+const FACTORY_ABI = [
+  "function getPair(address,address) view returns (address)",
+];
+
+const ERC20_ABI = [
+  "function decimals() view returns (uint8)",
+  "function approve(address,uint256) public returns (bool)",
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address,address) view returns (uint256)",
+  "function symbol() view returns (string)",
+];
+
+export default function App() {
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [account, setAccount] = useState("");
+  const [routerAddr, setRouterAddr] = useState("");
+  const [factoryAddr, setFactoryAddr] = useState("");
+  const [tokenAddr, setTokenAddr] = useState("");
+  const [ethAmount, setEthAmount] = useState("");
+  const [tokenAmount, setTokenAmount] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [debugInfo, setDebugInfo] = useState("");
+
+  useEffect(() => {
+    if (window.ethereum) {
+      const p = new ethers.BrowserProvider(window.ethereum);
+      setProvider(p);
+    }
+  }, []);
+
+  const connect = async () => {
+    if (!provider) return alert("Please install MetaMask");
+    await provider.send("eth_requestAccounts", []);
+    const s = await provider.getSigner();
+    const addr = await s.getAddress();
+    const { chainId } = await provider.getNetwork();
+
+    if (chainId !== HOODI_CHAIN_ID) {
+      try {
+        await provider.send("wallet_switchEthereumChain", [
+          { chainId: `0x${HOODI_CHAIN_ID.toString(16)}` },
+        ]);
+      } catch (e) {
+        alert("Please switch to Hoodi testnet in MetaMask");
+        return;
+      }
+    }
+
+    setSigner(s);
+    setAccount(addr);
+  };
+
+  const approveToken = async () => {
+    try {
+      if (!signer || !routerAddr || !tokenAddr) return alert("Missing data");
+      const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer);
+      const tx = await token.approve(routerAddr, ethers.MaxUint256);
+      await tx.wait();
+      alert("Token approved successfully.");
+    } catch (err) {
+      console.error(err);
+      alert("Approve failed");
+    }
+  };
+
+  const buyTokenWithETH = async () => {
+    if (!signer) return alert("Connect wallet first");
+    try {
+      const router = new ethers.Contract(routerAddr, ROUTER_ABI, signer);
+      const WETH = await router.WETH();
+      const path = [WETH, tokenAddr];
+      const deadline = Math.floor(Date.now() / 1000) + 600;
+      const tx =
+        await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
+          0,
+          path,
+          account,
+          deadline,
+          { value: ethers.parseEther(ethAmount) }
+        );
+      await tx.wait();
+      alert(`Bought token successfully: ${tx.hash}`);
+    } catch (err) {
+      console.error(err);
+      alert("Buy failed: " + err.message);
+    }
+  };
+
+  const sellTokenForETH = async () => {
+    if (!signer) return alert("Connect wallet first");
+    setIsLoading(true);
+    try {
+      const router = new ethers.Contract(routerAddr, ROUTER_ABI, signer);
+      const factory = factoryAddr
+        ? new ethers.Contract(factoryAddr, FACTORY_ABI, provider)
+        : null;
+      const WETH = await router.WETH();
+
+      if (factory) {
+        const pair = await factory.getPair(tokenAddr, WETH);
+        if (!pair || pair === ethers.ZeroAddress)
+          throw new Error("No liquidity pair for token <-> WETH");
+      }
+
+      const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer);
+      const decimals = await token.decimals();
+      const amount = ethers.parseUnits(tokenAmount, decimals);
+
+      const allowance = await token.allowance(account, routerAddr);
+      if (allowance < amount) {
+        const approveTx = await token.approve(routerAddr, ethers.MaxUint256);
+        await approveTx.wait();
+      }
+
+      let amountOutMin = 0n;
+      try {
+        const amounts = await router.getAmountsOut(amount, [tokenAddr, WETH]);
+        const quoted = amounts[amounts.length - 1];
+        amountOutMin = (BigInt(quoted.toString()) * 995n) / 1000n;
+      } catch (err) {
+        console.warn("getAmountsOut failed, fallback to 0", err);
+      }
+
+      const deadline = Math.floor(Date.now() / 1000) + 600;
+      const tx =
+        await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
+          amount,
+          amountOutMin,
+          [tokenAddr, WETH],
+          account,
+          deadline
+        );
+
+      await tx.wait();
+      alert(`Sold token successfully: ${tx.hash}`);
+    } catch (err) {
+      console.error("sellTokenForETH error:", err);
+      alert("Trade failed: " + err.message);
+      setDebugInfo(JSON.stringify(err, null, 2));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <CssBaseline />
+      <Container>
+        <h1>DEX DAPP (Hoodi)</h1>
+        <Button variant="contained" onClick={connect} sx={{ mb: 2 }}>
+          Connect Wallet
+        </Button>
+        <p>Account: {account}</p>
+
+        <Divider sx={{ my: 2 }} />
+
+        <TextField
+          label="Router Address"
+          fullWidth
+          sx={{ mb: 1 }}
+          value={routerAddr}
+          onChange={(e) => setRouterAddr(e.target.value)}
+        />
+        <TextField
+          label="Factory Address"
+          fullWidth
+          sx={{ mb: 1 }}
+          value={factoryAddr}
+          onChange={(e) => setFactoryAddr(e.target.value)}
+        />
+        <TextField
+          label="Token Address"
+          fullWidth
+          sx={{ mb: 1 }}
+          value={tokenAddr}
+          onChange={(e) => setTokenAddr(e.target.value)}
+        />
+
+        <Divider sx={{ my: 2 }} />
+
+        <h3>Buy Token With ETH</h3>
+        <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
+          <TextField
+            label="ETH Amount"
+            fullWidth
+            value={ethAmount}
+            onChange={(e) => setEthAmount(e.target.value)}
+          />
+          <Button variant="contained" onClick={buyTokenWithETH}>
+            Buy
+          </Button>
+        </Box>
+
+        <h3>Sell Token For ETH</h3>
+        <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
+          <TextField
+            label="Token Amount"
+            fullWidth
+            value={tokenAmount}
+            onChange={(e) => setTokenAmount(e.target.value)}
+          />
+          <Button variant="contained" onClick={approveToken}>
+            Approve
+          </Button>
+          <Button
+            variant="outlined"
+            disabled={isLoading}
+            onClick={sellTokenForETH}
+          >
+            {isLoading ? <CircularProgress size={24} /> : "Sell"}
+          </Button>
+        </Box>
+
+        <Divider sx={{ my: 2 }} />
+        <h3>Debug Info</h3>
+        <Card sx={{ p: 2, whiteSpace: "pre-wrap" }}>
+          {debugInfo || "No debug logs yet."}
+        </Card>
+      </Container>
+    </>
+  );
+}

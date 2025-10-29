@@ -1,0 +1,677 @@
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  CssBaseline,
+  Container,
+  Card,
+  Button,
+  TextField,
+  Box,
+  Divider,
+  CircularProgress,
+  MenuItem,
+  Select,
+  InputLabel,
+  FormControl,
+  Typography,
+  Grid,
+  Paper,
+} from "@mui/material";
+import { ethers } from "ethers";
+
+// Single-file DApp that satisfies the requirements:
+// - Connect via window.ethereum, show connected address
+// - Detect chainId and allow switching to HOODI (toggle button)
+// - Read & display symbol, decimals, balanceOf for a list of team tokens (Q1)
+// - Read & display token0, token1, getReserves for a list of pair addresses (Q2)
+// - Derive prices token <-> ETH for each pair
+// - Trade: buy with ETH, sell to ETH, swap token <-> token using UniswapV2Router02
+
+// ----------------------
+// CONFIGURE THESE
+// ----------------------
+const HOODI_CHAIN_ID = 560048; // Hoodi testnet
+
+// Provide your team tokens (Q1) here.
+// Replace addresses with your team members' token contract addresses.
+const TEAM_TOKENS = [
+  // Example: { name: "TokenA", address: "0x..." }
+  {
+    name: "DemoToken-PC",
+    address: "0xb567d0988945d0B5B1B64871a37A24Ea17Bea768",
+  },
+  {
+    name: "DemoToken-GS",
+    address: "0xc6980101F00398a8f91e8D2eEAe9dd76e56Ec5FC",
+  },
+];
+
+// Provide your team pairs (Q2) here (Uniswap V2 pair contract addresses)
+const TEAM_PAIRS = [
+  "0x8169ED28b2994D1050FfCC39925901688B1FBe41",
+  "0xDc50367c0b6501645144F9De5a7A8eF6C2b879Aa",
+];
+
+// Default router/factory (fill with your deployed UniswapV2Router02 & Factory on Hoodi)
+const DEFAULT_ROUTER = "0x5b491662E508c2E405500C8BF9d67E5dF780cD8e"; // e.g. 0x...
+const DEFAULT_FACTORY = "0x342D7aeC78cd3b581eb67655B6B7Bb157328590e"; // e.g. 0x...
+
+// Minimal ABIs
+const ERC20_ABI = [
+  "function symbol() view returns (string)",
+  "function decimals() view returns (uint8)",
+  "function balanceOf(address) view returns (uint256)",
+  "function approve(address,uint256) returns (bool)",
+];
+
+const PAIR_ABI = [
+  "function token0() view returns (address)",
+  "function token1() view returns (address)",
+  "function getReserves() view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast)",
+];
+
+const ROUTER_ABI = [
+  "function WETH() view returns (address)",
+  "function swapExactETHForTokensSupportingFeeOnTransferTokens(uint256,address[],address,uint256) payable",
+  "function swapExactTokensForETHSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
+  "function swapExactTokensForTokensSupportingFeeOnTransferTokens(uint256,uint256,address[],address,uint256)",
+];
+
+// ----------------------
+// Utility helpers
+// ----------------------
+const shortAddress = (addr) =>
+  addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : "-";
+
+function toDecimalString(bigNumber, decimals = 18, precision = 6) {
+  if (!bigNumber) return "0";
+  try {
+    const factor = ethers.parseUnits("1", decimals);
+    const asFloat = Number(ethers.formatUnits(bigNumber, decimals));
+    return asFloat.toFixed(Math.min(precision, 8));
+  } catch (e) {
+    return bigNumber.toString();
+  }
+}
+
+// ----------------------
+// Main App
+// ----------------------
+export default function App() {
+  const [provider, setProvider] = useState(null);
+  const [signer, setSigner] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [chainId, setChainId] = useState(null);
+  const [routerAddr, setRouterAddr] = useState(DEFAULT_ROUTER);
+  const [factoryAddr, setFactoryAddr] = useState(DEFAULT_FACTORY);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Data states
+  const [tokenMeta, setTokenMeta] = useState({}); // address -> {symbol, decimals, balance}
+  const [pairMeta, setPairMeta] = useState({}); // pairAddress -> {token0, token1, reserves, derivedPrices}
+
+  // Trade UI states
+  const [selectedFrom, setSelectedFrom] = useState("");
+  const [selectedTo, setSelectedTo] = useState("");
+  const [tradeAmount, setTradeAmount] = useState("");
+  const [tradeType, setTradeType] = useState("swap"); // buy/sell/swap
+
+  // Provider & events
+  useEffect(() => {
+    if (window.ethereum) {
+      const p = new ethers.BrowserProvider(window.ethereum);
+      setProvider(p);
+
+      // listen for account / chain changes (MetaMask events are legacy but helpful)
+      window.ethereum.on &&
+        window.ethereum.on("accountsChanged", (accounts) => {
+          if (accounts && accounts.length)
+            setAccount(ethers.getAddress(accounts[0]));
+          else {
+            setAccount(null);
+            setSigner(null);
+          }
+        });
+
+      window.ethereum.on &&
+        window.ethereum.on("chainChanged", (hexChainId) => {
+          const dec = Number.parseInt(hexChainId, 16);
+          setChainId(dec);
+        });
+    }
+  }, []);
+
+  const connect = async () => {
+    if (!provider)
+      return alert("No ethereum provider found - install MetaMask");
+    try {
+      setIsLoading(true);
+      await provider.send("eth_requestAccounts", []);
+      const s = await provider.getSigner();
+      const addr = await s.getAddress();
+      const net = await provider.getNetwork();
+      setSigner(s);
+      setAccount(addr);
+      setChainId(net.chainId);
+      setIsLoading(false);
+      return s;
+    } catch (e) {
+      console.error(e);
+      setIsLoading(false);
+      alert("Could not connect: " + (e?.message || e));
+    }
+  };
+
+  const ensureHoodiOrPrompt = async () => {
+    if (!provider) return false;
+    if (chainId === HOODI_CHAIN_ID) return true;
+    try {
+      await provider.send("wallet_switchEthereumChain", [
+        { chainId: `0x${HOODI_CHAIN_ID.toString(16)}` },
+      ]);
+      setChainId(HOODI_CHAIN_ID);
+      return true;
+    } catch (err) {
+      // user might need to add chain; give notice
+      alert("Please switch your wallet network to Hoodi testnet.");
+      return false;
+    }
+  };
+
+  // Fetch token metadata (symbol, decimals, balance)
+  const refreshTokenData = async () => {
+    if (!provider || !account) return;
+    const p = provider;
+    setIsLoading(true);
+    const next = { ...tokenMeta };
+    try {
+      for (const t of TEAM_TOKENS) {
+        const addr = ethers.getAddress(t.address);
+        const token = new ethers.Contract(addr, ERC20_ABI, p);
+        const [symbol, decimals, balance] = await Promise.all([
+          token.symbol().catch(() => "TKN"),
+          token.decimals().catch(() => 18),
+          token.balanceOf(account).catch(() => ethers.Zero),
+        ]);
+        next[addr] = { symbol, decimals, balance };
+      }
+      setTokenMeta(next);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Fetch pair metadata: token addresses, reserves, compute derived prices token<>ETH
+  const refreshPairData = async () => {
+    if (!provider) return;
+    setIsLoading(true);
+    const p = provider;
+    const next = { ...pairMeta };
+
+    try {
+      const router = routerAddr
+        ? new ethers.Contract(routerAddr, ROUTER_ABI, p)
+        : null;
+      const WETH = router ? await router.WETH().catch(() => null) : null;
+
+      for (const pairAddrRaw of TEAM_PAIRS) {
+        const pairAddr = ethers.getAddress(pairAddrRaw);
+        const pair = new ethers.Contract(pairAddr, PAIR_ABI, p);
+        const [token0, token1, reserves] = await Promise.all([
+          pair.token0(),
+          pair.token1(),
+          pair.getReserves(),
+        ]);
+
+        // try load token decimals & symbols
+        const t0 = new ethers.Contract(token0, ERC20_ABI, p);
+        const t1 = new ethers.Contract(token1, ERC20_ABI, p);
+        const [sym0, dec0, sym1, dec1] = await Promise.all([
+          t0.symbol().catch(() => "T0"),
+          t0.decimals().catch(() => 18),
+          t1.symbol().catch(() => "T1"),
+          t1.decimals().catch(() => 18),
+        ]);
+
+        // reserves: object with reserve0, reserve1
+        const r0 = reserves[0];
+        const r1 = reserves[1];
+
+        // derive prices relative to WETH if this pair contains WETH
+        let price0inETH = null;
+        let price1inETH = null;
+        if (WETH) {
+          const addrW = ethers.getAddress(WETH);
+          if (token0.toLowerCase() === addrW.toLowerCase()) {
+            // token1 per ETH = reserve0 / reserve1 ??? careful: if token0 == WETH, price of token1 in ETH = reserve0/reserve1
+            price1inETH =
+              Number(ethers.formatUnits(r0, dec0)) /
+              Number(ethers.formatUnits(r1, dec1));
+            price0inETH = 1; // WETH
+          } else if (token1.toLowerCase() === addrW.toLowerCase()) {
+            price0inETH =
+              Number(ethers.formatUnits(r1, dec1)) /
+              Number(ethers.formatUnits(r0, dec0));
+            price1inETH = 1;
+          }
+        }
+
+        next[pairAddr] = {
+          token0,
+          token1,
+          reserves: { reserve0: r0, reserve1: r1 },
+          symbols: { token0: sym0, token1: sym1 },
+          decimals: { token0: dec0, token1: dec1 },
+          derived: { price0inETH, price1inETH },
+        };
+      }
+
+      setPairMeta(next);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Combined refresh
+  const refreshAll = async () => {
+    await refreshTokenData();
+    await refreshPairData();
+  };
+
+  useEffect(() => {
+    if (account) {
+      refreshAll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, routerAddr]);
+
+  // ------------------
+  // Trading actions (using signer)
+  // ------------------
+  const buyTokenWithETH = async (ethAmount, tokenAddress) => {
+    if (!signer) return alert("Connect wallet first");
+    if (!routerAddr) return alert("Set router address");
+
+    const router = new ethers.Contract(routerAddr, ROUTER_ABI, signer);
+    const WETH = await router.WETH();
+    const path = [WETH, tokenAddress];
+    const amountIn = ethers.parseEther(String(ethAmount));
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+
+    const tx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
+      0,
+      path,
+      account,
+      deadline,
+      { value: amountIn }
+    );
+    await tx.wait();
+    return tx.hash;
+  };
+
+  const sellTokenForETH = async (tokenAmount, tokenAddress) => {
+    if (!signer) return alert("Connect wallet first");
+    if (!routerAddr) return alert("Set router address");
+
+    const router = new ethers.Contract(routerAddr, ROUTER_ABI, signer);
+    const WETH = await router.WETH();
+
+    // Ensure approval
+    const token = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+    const amount = ethers.parseUnits(
+      String(tokenAmount),
+      await token.decimals()
+    );
+    await token.approve(routerAddr, amount);
+
+    const path = [tokenAddress, WETH];
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+    const tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
+      amount,
+      0,
+      path,
+      account,
+      deadline
+    );
+    await tx.wait();
+    return tx.hash;
+  };
+
+  const swapTokenForToken = async (tokenAmount, fromToken, toToken) => {
+    if (!signer) return alert("Connect wallet first");
+    if (!routerAddr) return alert("Set router address");
+
+    const router = new ethers.Contract(routerAddr, ROUTER_ABI, signer);
+    const token = new ethers.Contract(fromToken, ERC20_ABI, signer);
+    const dec = await token.decimals();
+    const amount = ethers.parseUnits(String(tokenAmount), dec);
+    await token.approve(routerAddr, amount);
+
+    const path = [fromToken, toToken];
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+    const tx =
+      await router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        amount,
+        0,
+        path,
+        account,
+        deadline
+      );
+    await tx.wait();
+    return tx.hash;
+  };
+
+  // UI handlers
+  const handleTrade = async () => {
+    if (!signer) return alert("Please connect wallet first");
+    if (!tradeAmount || Number(tradeAmount) <= 0)
+      return alert("Enter valid amount");
+
+    try {
+      setIsLoading(true);
+      if (tradeType === "buy") {
+        // buy selectedTo with ETH
+        await buyTokenWithETH(tradeAmount, selectedTo);
+        alert("Buy tx sent");
+      } else if (tradeType === "sell") {
+        // sell selectedFrom for ETH
+        await sellTokenForETH(tradeAmount, selectedFrom);
+        alert("Sell tx sent");
+      } else {
+        // swap token -> token
+        await swapTokenForToken(tradeAmount, selectedFrom, selectedTo);
+        alert("Swap tx sent");
+      }
+      await refreshAll();
+    } catch (e) {
+      console.error(e);
+      alert("Trade failed: " + (e?.message || e));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Derived lists for selects
+  const availableTokens = useMemo(() => {
+    const fromList = [];
+    for (const t of TEAM_TOKENS) {
+      if (!t?.address) continue;
+      const a = ethers.getAddress(t.address);
+      fromList.push({
+        address: a,
+        label: t.name || tokenMeta[a]?.symbol || shortAddress(a),
+      });
+    }
+    // also allow WETH/ETH as "ETH" placeholder
+    // if router configured, detect WETH address
+    if (routerAddr && provider) {
+      // lazy; we won't await here
+    }
+    return fromList;
+  }, [tokenMeta]);
+
+  return (
+    <>
+      <CssBaseline />
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Typography variant="h4" gutterBottom>
+          DEX DApp — Team Tokens & Pools
+        </Typography>
+
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item>
+              <Button
+                variant="contained"
+                onClick={connect}
+                disabled={!!account || isLoading}
+              >
+                {account ? "Connected" : "Connect Wallet"}
+              </Button>
+            </Grid>
+            <Grid item>
+              <Typography>
+                Address: {account ? shortAddress(account) : "Not connected"}
+              </Typography>
+            </Grid>
+            <Grid item>
+              <Typography>Chain ID: {chainId ?? "-"}</Typography>
+            </Grid>
+            <Grid item>
+              <Button
+                variant="outlined"
+                onClick={async () => {
+                  const ok = await ensureHoodiOrPrompt();
+                  if (ok) alert("Switched to Hoodi");
+                }}
+              >
+                Switch to Hoodi
+              </Button>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Uniswap Router Address"
+                value={routerAddr}
+                onChange={(e) => setRouterAddr(e.target.value)}
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <TextField
+                label="Uniswap Factory Address"
+                value={factoryAddr}
+                onChange={(e) => setFactoryAddr(e.target.value)}
+                fullWidth
+              />
+            </Grid>
+          </Grid>
+        </Paper>
+
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6">Token Balances (Q1 tokens)</Typography>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            {TEAM_TOKENS.length === 0 && (
+              <Grid item xs={12}>
+                <Typography color="text.secondary">
+                  No team tokens configured — edit TEAM_TOKENS in the file.
+                </Typography>
+              </Grid>
+            )}
+
+            {TEAM_TOKENS.map((t) => {
+              const addr = t.address ? ethers.getAddress(t.address) : null;
+              const meta = addr ? tokenMeta[addr] : null;
+              return (
+                <Grid item xs={12} md={4} key={t.address || Math.random()}>
+                  <Card sx={{ p: 2 }}>
+                    <Typography variant="subtitle1">
+                      {t.name || shortAddress(addr)}
+                    </Typography>
+                    <Typography variant="body2">
+                      Address: {addr ? shortAddress(addr) : "-"}
+                    </Typography>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography>Symbol: {meta?.symbol ?? "-"}</Typography>
+                    <Typography>Decimals: {meta?.decimals ?? "-"}</Typography>
+                    <Typography>
+                      Balance:{" "}
+                      {meta?.balance
+                        ? toDecimalString(meta.balance, meta.decimals)
+                        : "-"}
+                    </Typography>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </Box>
+
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6">Pool Info (Q2 pairs)</Typography>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            {TEAM_PAIRS.length === 0 && (
+              <Grid item xs={12}>
+                <Typography color="text.secondary">
+                  No pair addresses configured — edit TEAM_PAIRS in the file.
+                </Typography>
+              </Grid>
+            )}
+
+            {TEAM_PAIRS.map((pairAddrRaw) => {
+              let pairAddr = "";
+              try {
+                pairAddr = pairAddrRaw ? ethers.getAddress(pairAddrRaw) : "";
+              } catch (e) {
+                pairAddr = pairAddrRaw;
+              }
+              const meta = pairMeta[pairAddr];
+              return (
+                <Grid item xs={12} md={6} key={pairAddrRaw}>
+                  <Card sx={{ p: 2 }}>
+                    <Typography variant="subtitle1">
+                      Pair: {shortAddress(pairAddr)}
+                    </Typography>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography>
+                      Token0:{" "}
+                      {meta?.symbols?.token0 ?? shortAddress(meta?.token0)}
+                    </Typography>
+                    <Typography>
+                      Token1:{" "}
+                      {meta?.symbols?.token1 ?? shortAddress(meta?.token1)}
+                    </Typography>
+                    <Typography>
+                      Reserves:
+                      <br />
+                      {meta?.reserves
+                        ? `${toDecimalString(
+                            meta.reserves.reserve0,
+                            meta.decimals.token0
+                          )} ${meta.symbols.token0} — ${toDecimalString(
+                            meta.reserves.reserve1,
+                            meta.decimals.token1
+                          )} ${meta.symbols.token1}`
+                        : "-"}
+                    </Typography>
+                    <Typography>
+                      Derived prices (token ↔ ETH):{" "}
+                      {meta?.derived?.price0inETH
+                        ? `${meta.symbols.token0} = ${meta.derived.price0inETH} ETH`
+                        : "-"}
+                      <br />
+                      {meta?.derived?.price1inETH
+                        ? `${meta.symbols.token1} = ${meta.derived.price1inETH} ETH`
+                        : "-"}
+                    </Typography>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        </Box>
+
+        <Divider sx={{ my: 3 }} />
+
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6">Trade</Typography>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth>
+                <InputLabel>From</InputLabel>
+                <Select
+                  label="From"
+                  value={selectedFrom}
+                  onChange={(e) => setSelectedFrom(e.target.value)}
+                >
+                  <MenuItem value="ETH">ETH</MenuItem>
+                  {availableTokens.map((t) => (
+                    <MenuItem key={t.address} value={t.address}>
+                      {t.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth>
+                <InputLabel>To</InputLabel>
+                <Select
+                  label="To"
+                  value={selectedTo}
+                  onChange={(e) => setSelectedTo(e.target.value)}
+                >
+                  <MenuItem value="ETH">ETH</MenuItem>
+                  {availableTokens.map((t) => (
+                    <MenuItem key={t.address} value={t.address}>
+                      {t.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} md={2}>
+              <TextField
+                label="Amount"
+                value={tradeAmount}
+                onChange={(e) => setTradeAmount(e.target.value)}
+                fullWidth
+              />
+            </Grid>
+
+            <Grid item xs={12} md={2}>
+              <FormControl fullWidth>
+                <InputLabel>Type</InputLabel>
+                <Select
+                  value={tradeType}
+                  onChange={(e) => setTradeType(e.target.value)}
+                  label="Type"
+                >
+                  <MenuItem value="swap">Swap (token→token)</MenuItem>
+                  <MenuItem value="buy">Buy (ETH→token)</MenuItem>
+                  <MenuItem value="sell">Sell (token→ETH)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid
+              item
+              xs={12}
+              md={2}
+              sx={{ display: "flex", alignItems: "center" }}
+            >
+              <Button
+                variant="contained"
+                onClick={handleTrade}
+                disabled={isLoading}
+                fullWidth
+              >
+                {isLoading ? <CircularProgress size={20} /> : "Execute"}
+              </Button>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Typography color="text.secondary">
+                Notes: For buy (ETH→token) select To as a token and Type=Buy.
+                For sell select From as a token and Type=Sell. For token→token
+                select From/To accordingly.
+              </Typography>
+            </Grid>
+          </Grid>
+        </Box>
+
+        <Divider sx={{ my: 3 }} />
+
+        <Box sx={{ mb: 6 }}>
+          <Button variant="outlined" onClick={refreshAll} disabled={isLoading}>
+            Refresh Data
+          </Button>
+        </Box>
+      </Container>
+    </>
+  );
+}
