@@ -477,7 +477,7 @@ export default function App() {
       <CssBaseline />
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Typography variant="h5" gutterBottom>
-          DEX DApp — Multi Tab (Hoodi)
+          FIN556-DEX Trading Application
         </Typography>
 
         <Button variant="contained" onClick={connect} sx={{ mb: 2 }}>
@@ -591,9 +591,11 @@ export default function App() {
             </Box>
 
             <Divider sx={{ my: 2 }} />
-            <Typography variant="h6">Debug / Logs</Typography>
+            <Typography variant="h6">
+              Transaction Status/Updates/Information
+            </Typography>
             <Card sx={{ p: 2, whiteSpace: "pre-wrap", minHeight: 120 }}>
-              {debug || "No logs yet"}
+              {debug || "No Info yet"}
             </Card>
           </>
         )}
