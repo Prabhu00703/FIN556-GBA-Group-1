@@ -16,6 +16,7 @@ const CONFIG = {
   INIT_ETH: 0.1,
 };
 
+
 // ---------------- ABI DEFINITIONS ---------------- //
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
